@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 
@@ -94,11 +95,12 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
     
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = "Fetch URL and extract readable content (HTML → markdown/text). Supports custom headers for authenticated APIs."
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string", "description": "URL to fetch"},
+            "headers": {"type": "object", "description": "Custom HTTP headers (e.g. {\"token\": \"xxx\", \"Authorization\": \"Bearer xxx\"})"},
             "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
             "maxChars": {"type": "integer", "minimum": 100}
         },
@@ -108,7 +110,7 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000):
         self.max_chars = max_chars
     
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    async def execute(self, url: str, headers: dict[str, str] | None = None, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
         max_chars = maxChars or self.max_chars
@@ -119,12 +121,24 @@ class WebFetchTool(Tool):
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url})
 
         try:
+            # Merge default User-Agent with custom headers
+            request_headers = {"User-Agent": USER_AGENT}
+            if headers:
+                request_headers.update(headers)
+
+            # Log headers (mask sensitive values)
+            _sensitive = {"token", "authorization", "x-api-key", "x-subscription-token", "cookie"}
+            log_headers = {k: (v[:8] + "..." if k.lower() in _sensitive and len(v) > 8 else v) for k, v in request_headers.items()}
+            logger.debug(f"web_fetch {url} headers={log_headers}")
+
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 max_redirects=MAX_REDIRECTS,
                 timeout=30.0
             ) as client:
-                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                r = await client.get(url, headers=request_headers)
+                if r.status_code != 200:
+                    logger.warning(f"web_fetch {url} returned {r.status_code}: {r.text[:200]}")
                 r.raise_for_status()
             
             ctype = r.headers.get("content-type", "")

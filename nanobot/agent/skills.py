@@ -6,6 +6,8 @@ import re
 import shutil
 from pathlib import Path
 
+from loguru import logger
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -82,10 +84,10 @@ class SkillsLoader:
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
         Load specific skills for inclusion in agent context.
-        
+
         Args:
             skill_names: List of skill names to load.
-        
+
         Returns:
             Formatted skills content.
         """
@@ -94,8 +96,9 @@ class SkillsLoader:
             content = self.load_skill(name)
             if content:
                 content = self._strip_frontmatter(content)
+                content = self._resolve_secrets(name, content)
                 parts.append(f"### Skill: {name}\n\n{content}")
-        
+
         return "\n\n---\n\n".join(parts) if parts else ""
     
     def build_skills_summary(self) -> str:
@@ -200,6 +203,71 @@ class SkillsLoader:
                 result.append(s["name"])
         return result
     
+    def match_skills(self, message: str) -> list[str]:
+        """
+        Match skills to a user message based on trigger keywords.
+
+        Skills can define triggers in metadata:
+            metadata: {"nanobot":{"triggers":["keyword1","keyword2"]}}
+
+        Args:
+            message: The user's message text.
+
+        Returns:
+            List of skill names whose triggers match the message.
+        """
+        matched = []
+        msg_lower = message.lower()
+
+        for s in self.list_skills(filter_unavailable=True):
+            skill_meta = self._get_skill_meta(s["name"])
+            triggers = skill_meta.get("triggers", [])
+            if not triggers:
+                continue
+            for trigger in triggers:
+                if trigger.lower() in msg_lower:
+                    matched.append(s["name"])
+                    break
+
+        return matched
+
+    def _resolve_secrets(self, name: str, content: str) -> str:
+        """
+        Resolve {{SECRET}} placeholders in skill content using metadata secrets mapping.
+
+        Metadata format: {"nanobot":{"secrets":{"KEY":"~/path/to/file.txt"}}}
+        Content placeholders: {{KEY}} will be replaced with file contents.
+        Secret files must be located under ~/.nanobot/ for security.
+        """
+        skill_meta = self._get_skill_meta(name)
+        secrets = skill_meta.get("secrets", {})
+        if not secrets:
+            return content
+
+        allowed_dir = Path("~/.nanobot").expanduser().resolve()
+
+        for key, file_path in secrets.items():
+            placeholder = "{{" + key + "}}"
+            if placeholder not in content:
+                continue
+            try:
+                resolved = Path(file_path).expanduser().resolve()
+                if not str(resolved).startswith(str(allowed_dir)):
+                    logger.warning(f"Skill '{name}': secret '{key}' path outside ~/.nanobot/, skipping")
+                    continue
+                if not resolved.exists():
+                    logger.warning(f"Skill '{name}': secret file not found: {resolved}")
+                    continue
+                value = resolved.read_text(encoding="utf-8").strip()
+                if not value:
+                    logger.warning(f"Skill '{name}': secret file is empty: {resolved}")
+                    continue
+                content = content.replace(placeholder, value)
+            except Exception as e:
+                logger.warning(f"Skill '{name}': failed to read secret '{key}': {e}")
+
+        return content
+
     def get_skill_metadata(self, name: str) -> dict | None:
         """
         Get metadata from a skill's frontmatter.

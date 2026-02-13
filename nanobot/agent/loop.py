@@ -175,10 +175,16 @@ class AgentLoop:
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(msg.channel, msg.chat_id)
         
+        # Match skills based on message content (trigger keywords)
+        matched_skills = self.context.skills.match_skills(msg.content)
+        if matched_skills:
+            logger.info(f"Matched skills: {matched_skills}")
+
         # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
+            skill_names=matched_skills,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
