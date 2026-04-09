@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.itick.org)"
+      "WebFetch(domain:docs.itick.org)",
+      "Bash(/c/Users/17140/anaconda3/envs/torch/python.exe /c/Users/17140/Desktop/nanobot/nanobot/skills/biga-analysis/scripts/run.py sh600519 -i MACD,RSI,KDJ,BBANDS,DMI,OBV,BRAR,ATR -j)"
     ]
   }
 }
