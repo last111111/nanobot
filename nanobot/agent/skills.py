@@ -1,12 +1,16 @@
 """Skills loader for agent capabilities."""
 
+import importlib.util
 import json
 import os
+import platform
 import re
 import shutil
 from pathlib import Path
 
 from loguru import logger
+
+from nanobot.utils.skill_runtime import resolve_skill_placeholders
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -68,18 +72,8 @@ class SkillsLoader:
         Returns:
             Skill content or None if not found.
         """
-        # Check workspace first
-        workspace_skill = self.workspace_skills / name / "SKILL.md"
-        if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
-        
-        # Check built-in
-        if self.builtin_skills:
-            builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
-        
-        return None
+        skill_file = self._get_skill_file(name)
+        return skill_file.read_text(encoding="utf-8") if skill_file else None
     
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -93,11 +87,18 @@ class SkillsLoader:
         """
         parts = []
         for name in skill_names:
-            content = self.load_skill(name)
-            if content:
+            skill_file = self._get_skill_file(name)
+            content = skill_file.read_text(encoding="utf-8") if skill_file else None
+            if content and skill_file:
                 content = self._strip_frontmatter(content)
                 content = self._resolve_secrets(name, content)
-                parts.append(f"### Skill: {name}\n\n{content}")
+                content = resolve_skill_placeholders(content, skill_file.parent)
+                parts.append(
+                    f"### Skill: {name}\n\n"
+                    f"Skill Root: {skill_file.parent}\n"
+                    f"Skill File: {skill_file}\n\n"
+                    f"{content}"
+                )
 
         return "\n\n---\n\n".join(parts) if parts else ""
     
@@ -145,6 +146,11 @@ class SkillsLoader:
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
         missing = []
+        supported_os = skill_meta.get("os", [])
+        current_os = platform.system().lower()
+        if supported_os and current_os not in {os_name.lower() for os_name in supported_os}:
+            missing.append(f"OS: {current_os} not in {', '.join(supported_os)}")
+
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
             if not shutil.which(b):
@@ -152,6 +158,9 @@ class SkillsLoader:
         for env in requires.get("env", []):
             if not os.environ.get(env):
                 missing.append(f"ENV: {env}")
+        for module in requires.get("python_modules", []):
+            if importlib.util.find_spec(module) is None:
+                missing.append(f"PYTHON: {module}")
         return ", ".join(missing)
     
     def _get_skill_description(self, name: str) -> str:
@@ -178,7 +187,12 @@ class SkillsLoader:
             return {}
     
     def _check_requirements(self, skill_meta: dict) -> bool:
-        """Check if skill requirements are met (bins, env vars)."""
+        """Check if skill requirements are met (os, bins, env vars, Python modules)."""
+        supported_os = skill_meta.get("os", [])
+        current_os = platform.system().lower()
+        if supported_os and current_os not in {os_name.lower() for os_name in supported_os}:
+            return False
+
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
             if not shutil.which(b):
@@ -186,12 +200,28 @@ class SkillsLoader:
         for env in requires.get("env", []):
             if not os.environ.get(env):
                 return False
+        for module in requires.get("python_modules", []):
+            if importlib.util.find_spec(module) is None:
+                return False
         return True
     
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
         meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(meta.get("metadata", ""))
+
+    def _get_skill_file(self, name: str) -> Path | None:
+        """Return the path to a skill's SKILL.md file."""
+        workspace_skill = self.workspace_skills / name / "SKILL.md"
+        if workspace_skill.exists():
+            return workspace_skill
+
+        if self.builtin_skills:
+            builtin_skill = self.builtin_skills / name / "SKILL.md"
+            if builtin_skill.exists():
+                return builtin_skill
+
+        return None
     
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""

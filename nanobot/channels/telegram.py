@@ -97,6 +97,8 @@ class TelegramChannel(BaseChannel):
         BotCommand("reset", "Reset conversation history"),
         BotCommand("help", "Show available commands"),
     ]
+    REQUEST_TIMEOUT_SECONDS = 30
+    BOOTSTRAP_RETRIES = 3
     
     def __init__(
         self,
@@ -122,7 +124,18 @@ class TelegramChannel(BaseChannel):
         self._running = True
         
         # Build the application
-        builder = Application.builder().token(self.config.token)
+        builder = (
+            Application.builder()
+            .token(self.config.token)
+            .connect_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .read_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .write_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .pool_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .get_updates_connect_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .get_updates_read_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .get_updates_write_timeout(self.REQUEST_TIMEOUT_SECONDS)
+            .get_updates_pool_timeout(self.REQUEST_TIMEOUT_SECONDS)
+        )
         if self.config.proxy:
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
@@ -159,6 +172,8 @@ class TelegramChannel(BaseChannel):
         
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
+            timeout=self.REQUEST_TIMEOUT_SECONDS,
+            bootstrap_retries=self.BOOTSTRAP_RETRIES,
             allowed_updates=["message"],
             drop_pending_updates=True  # Ignore old messages on startup
         )

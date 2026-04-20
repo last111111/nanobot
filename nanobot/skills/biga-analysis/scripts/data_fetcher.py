@@ -10,15 +10,24 @@ import datetime
 import requests
 import pandas as pd
 
+REQUEST_TIMEOUT = 10
+
+
+def _load_json(url):
+    """Fetch and decode JSON payloads with a bounded timeout."""
+    response = requests.get(url, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    return json.loads(response.content)
+
 
 def get_price_day_tx(code, end_date='', count=10, frequency='1d'):
     """腾讯日/周/月线数据"""
-    unit = 'week' if frequency in '1w' else 'month' if frequency in '1M' else 'day'
+    unit = 'week' if frequency == '1w' else 'month' if frequency == '1M' else 'day'
     if end_date:
         end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, datetime.date) else end_date.split(' ')[0]
     end_date = '' if end_date == datetime.datetime.now().strftime('%Y-%m-%d') else end_date
     URL = f'http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={code},{unit},,{end_date},{count},qfq'
-    st = json.loads(requests.get(URL).content)
+    st = _load_json(URL)
     ms = 'qfq' + unit
     stk = st['data'][code]
     buf = stk[ms] if ms in stk else stk[unit]
@@ -35,7 +44,7 @@ def get_price_min_tx(code, end_date=None, count=10, frequency='1d'):
     if end_date:
         end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, datetime.date) else end_date.split(' ')[0]
     URL = f'http://ifzq.gtimg.cn/appstock/app/kline/mkline?param={code},m{ts},,{count}'
-    st = json.loads(requests.get(URL).content)
+    st = _load_json(URL)
     buf = st['data'][code]['m' + str(ts)]
     df = pd.DataFrame(buf, columns=['time', 'open', 'close', 'high', 'low', 'volume', 'n1', 'n2'])
     df = df[['time', 'open', 'close', 'high', 'low', 'volume']]
@@ -43,7 +52,7 @@ def get_price_min_tx(code, end_date=None, count=10, frequency='1d'):
     df.time = pd.to_datetime(df.time)
     df.set_index(['time'], inplace=True)
     df.index.name = ''
-    df['close'].iloc[-1] = float(st['data'][code]['qt'][code][3])
+    df.iloc[-1, df.columns.get_loc('close')] = float(st['data'][code]['qt'][code][3])
     return df
 
 
@@ -58,7 +67,7 @@ def get_price_sina(code, end_date='', count=10, frequency='60m'):
         count = count + (datetime.datetime.now() - end_date).days // unit
     URL = (f'http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/'
            f'CN_MarketData.getKLineData?symbol={code}&scale={ts}&ma=5&datalen={count}')
-    dstr = json.loads(requests.get(URL).content)
+    dstr = _load_json(URL)
     df = pd.DataFrame(dstr, columns=['day', 'open', 'high', 'low', 'close', 'volume'])
     df['open'] = df['open'].astype(float)
     df['high'] = df['high'].astype(float)
@@ -93,16 +102,27 @@ def get_price(code, end_date='', count=10, frequency='1d'):
     xcode = code.replace('.XSHG', '').replace('.XSHE', '')
     xcode = 'sh' + xcode if ('XSHG' in code) else 'sz' + xcode if ('XSHE' in code) else code
 
+    providers = []
     if frequency in ['1d', '1w', '1M']:
-        try:
-            return get_price_sina(xcode, end_date=end_date, count=count, frequency=frequency)
-        except Exception:
-            return get_price_day_tx(xcode, end_date=end_date, count=count, frequency=frequency)
+        providers = [
+            ("sina", get_price_sina),
+            ("tencent", get_price_day_tx),
+        ]
+    elif frequency in ['1m', '5m', '15m', '30m', '60m']:
+        providers = [
+            ("tencent", get_price_min_tx),
+        ] if frequency == '1m' else [
+            ("sina", get_price_sina),
+            ("tencent", get_price_min_tx),
+        ]
+    else:
+        raise ValueError(f'不支持的频率: {frequency}')
 
-    if frequency in ['1m', '5m', '15m', '30m', '60m']:
-        if frequency in '1m':
-            return get_price_min_tx(xcode, end_date=end_date, count=count, frequency=frequency)
+    errors = []
+    for provider_name, provider in providers:
         try:
-            return get_price_sina(xcode, end_date=end_date, count=count, frequency=frequency)
-        except Exception:
-            return get_price_min_tx(xcode, end_date=end_date, count=count, frequency=frequency)
+            return provider(xcode, end_date=end_date, count=count, frequency=frequency)
+        except Exception as exc:
+            errors.append(f'{provider_name}: {exc}')
+
+    raise RuntimeError(' ; '.join(errors))

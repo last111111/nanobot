@@ -22,7 +22,7 @@ import pandas as pd
 # 支持直接运行和模块导入两种方式
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data_fetcher import get_price
-from ta_functions import INDICATOR_REGISTRY, MACD, KDJ, RSI, BBANDS, ATR, OBV
+from ta_functions import INDICATOR_REGISTRY
 
 
 def compute_indicator(name, df):
@@ -96,6 +96,27 @@ def _last_valid(series):
     return round(float(series), 4) if series is not None else None
 
 
+def _format_last_time(timestamp, frequency):
+    """Format timestamps consistently for day and minute bars."""
+    ts = pd.Timestamp(timestamp)
+    if frequency.endswith('m'):
+        return ts.strftime('%Y-%m-%d %H:%M:%S')
+    return ts.strftime('%Y-%m-%d')
+
+
+def _error_result(code, frequency, count, message):
+    """Build a stable machine-readable error payload."""
+    return {
+        'error': message,
+        'price': {
+            'code': code,
+            'frequency': frequency,
+            'count': count,
+        },
+        'indicators': {},
+    }
+
+
 def analyze(code, frequency='1d', count=120, indicators=None):
     """
     获取行情 + 计算技术指标
@@ -110,10 +131,13 @@ def analyze(code, frequency='1d', count=120, indicators=None):
         dict: 完整分析结果 (可直接 json.dumps)
     """
     # 获取数据
-    df = get_price(code, count=count, frequency=frequency)
+    try:
+        df = get_price(code, count=count, frequency=frequency)
+    except Exception as e:
+        return _error_result(code, frequency, count, f'获取行情失败: {e}')
 
     if df is None or df.empty:
-        return {'error': f'无法获取 {code} 的行情数据'}
+        return _error_result(code, frequency, count, f'无法获取 {code} 的行情数据')
 
     # 确定要计算的指标
     if indicators is None:
@@ -131,7 +155,7 @@ def analyze(code, frequency='1d', count=120, indicators=None):
     price_info = {
         'code': code,
         'frequency': frequency,
-        'last_time': str(df.index[-1]),
+        'last_time': _format_last_time(df.index[-1], frequency),
         'open': round(float(last['open']), 4),
         'close': round(float(last['close']), 4),
         'high': round(float(last['high']), 4),
@@ -148,6 +172,13 @@ def analyze(code, frequency='1d', count=120, indicators=None):
 
 def format_table(data):
     """格式化为可读文本表格"""
+    if 'error' in data:
+        price = data.get('price', {})
+        return (
+            f"获取失败: {data['error']}\n"
+            f"证券代码: {price.get('code', '?')}  周期: {price.get('frequency', '?')}"
+        )
+
     lines = []
     price = data.get('price', {})
     lines.append(f"{'='*50}")
@@ -204,6 +235,9 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(format_table(result))
+
+    if 'error' in result:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.utils.skill_runtime import find_skill_root, resolve_skill_placeholders
 
 
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
@@ -50,6 +51,7 @@ class ReadFileTool(Tool):
                 return f"Error: Not a file: {path}"
             
             content = file_path.read_text(encoding="utf-8")
+            content = resolve_skill_placeholders(content, find_skill_root(file_path))
             return content
         except PermissionError as e:
             return f"Error: {e}"

@@ -8,7 +8,7 @@
 
 所有指标通过 `run.py` 脚本计算，脚本位于：
 ```
-nanobot/skills/biga-analysis/scripts/run.py
+{baseDir}/scripts/run.py
 ```
 
 ### 调用方式一：exec 执行（推荐，LLM 最常用）
@@ -18,8 +18,8 @@ import subprocess, json
 
 result = subprocess.run(
     [
-        "C:/Users/17140/anaconda3/envs/torch/python.exe",
-        "nanobot/skills/biga-analysis/scripts/run.py",
+        "{pythonExe}",
+        "{baseDir}/scripts/run.py",
         "sh600519",          # 股票代码
         "-i", "MACD,RSI,KDJ,BBANDS",  # 指定指标，逗号分隔
         "-j"                 # JSON输出
@@ -34,20 +34,18 @@ indicators = data["indicators"]  # 指标结果
 ### 调用方式二：命令行直接运行
 
 ```bash
-# 激活环境（必须）
-conda activate torch
 
 # 茅台日线，指定指标，JSON输出
-python nanobot/skills/biga-analysis/scripts/run.py sh600519 -i MACD,RSI,KDJ,BBANDS -j
+"{pythonExe}" "{baseDir}/scripts/run.py" sh600519 -i MACD,RSI,KDJ,BBANDS -j
 
 # 全部指标
-python nanobot/skills/biga-analysis/scripts/run.py sh000001 -j
+"{pythonExe}" "{baseDir}/scripts/run.py" sh000001 -j
 
 # 15分钟线，60根K线
-python nanobot/skills/biga-analysis/scripts/run.py sh600519 --freq 15m --count 60 -j
+"{pythonExe}" "{baseDir}/scripts/run.py" sh600519 --freq 15m --count 60 -j
 
 # 列出所有可用指标名
-python nanobot/skills/biga-analysis/scripts/run.py --list
+"{pythonExe}" "{baseDir}/scripts/run.py" --list
 ```
 
 ### 参数说明
@@ -68,7 +66,7 @@ python nanobot/skills/biga-analysis/scripts/run.py --list
   "price": {
     "code": "sh600519",
     "frequency": "1d",
-    "last_time": "2026-04-08 00:00:00",
+    "last_time": "2026-04-08",
     "open": 1460.0, "close": 1465.02,
     "high": 1469.08, "low": 1452.13,
     "volume": 3383610.0, "count": 120
@@ -76,7 +74,7 @@ python nanobot/skills/biga-analysis/scripts/run.py --list
   "indicators": {
     "MACD_DIF": 5.1713,
     "MACD_DEA": 1.0798,
-    "MACD_MACD_HIST": 8.183,
+    "MACD_HIST": 8.183,
     "RSI": 48.934,
     "KDJ_K": 67.3073, "KDJ_D": 57.9519, "KDJ_J": 86.0183,
     "BBANDS_UPPER": 1490.58, "BBANDS_MID": 1435.74, "BBANDS_LOWER": 1380.89
@@ -100,8 +98,8 @@ python nanobot/skills/biga-analysis/scripts/run.py --list
 
 ### 环境要求
 
-- Python：`C:/Users/17140/anaconda3/envs/torch/python.exe`
-- 依赖：pandas、numpy、requests（torch 环境已内置）
+- Python：`{pythonExe}`
+- 依赖：pandas、numpy、requests
 - 网络：需访问新浪/腾讯财经 API（国内网络）
 - 数据：非交易时间返回最近交易日数据
 
@@ -133,7 +131,7 @@ MACD柱 = (DIF - DEA) × 2
 **调用：**
 ```python
 result = analyze('sh600519', indicators=['MACD'])
-# 返回: MACD_DIF, MACD_DEA, MACD_MACD_HIST
+# 返回: MACD_DIF, MACD_DEA, MACD_HIST
 ```
 
 ---
